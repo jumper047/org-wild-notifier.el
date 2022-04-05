@@ -5,6 +5,8 @@
 ;; Author: Artem Khramov <akhramov+emacs@pm.me>
 ;; Created: 6 Jan 2017
 ;; Version: 0.4.1
+;; Package-Version: 20220402.2331
+;; Package-Commit: 4b1d874aafdee90815136c308f1f3bd3577971ec
 ;; Package-Requires: ((alert "1.2") (async "1.9.3") (dash "2.18.0") (emacs "24.4"))
 ;; Keywords: notification alert org org-agenda agenda
 ;; URL: https://github.com/akhramov/org-wild-notifier.el
@@ -72,6 +74,12 @@ to an event."
 (defcustom org-wild-notifier-notification-title "Agenda"
   "Notifications title."
   :package-version '(org-wild-notifier . "0.1.0")
+  :group 'org-wild-notifier
+  :type 'string)
+
+(defcustom org-wild-notifier-notification-icon nil
+  "Path to notification icon file."
+  :package-version '(org-wild-notifier . "0.4.1")
   :group 'org-wild-notifier
   :type 'string)
 
@@ -200,27 +208,27 @@ Returns a list of notification messages"
   (->> `([,org-wild-notifier-keyword-whitelist
           (lambda (it)
             (-contains-p org-wild-notifier-keyword-whitelist
-                         (org-entry-get it "TODO")))]
+                         (org-entry-get (cl-first it) "TODO")))]
 
          [,org-wild-notifier-tags-whitelist
           (lambda (it)
             (-intersection org-wild-notifier-tags-whitelist
-                           (org-wild-notifier--get-tags it)))])
-       (--filter (aref it 0))
-       (--map (aref it 1))))
+                           (org-wild-notifier--get-tags (cl-first it))))])
+       (--filter (aref (cl-first it) 0))
+       (--map (aref (cl-first it) 1))))
 
 (defun org-wild-notifier--blacklist-predicates ()
   (->> `([,org-wild-notifier-keyword-blacklist
           (lambda (it)
             (-contains-p org-wild-notifier-keyword-blacklist
-                         (org-entry-get it "TODO")))]
+                         (org-entry-get (cl-first it) "TODO")))]
 
          [,org-wild-notifier-tags-blacklist
           (lambda (it)
             (-intersection org-wild-notifier-tags-blacklist
-                           (org-wild-notifier--get-tags it)))])
-       (--filter (aref it 0))
-       (--map (aref it 1))))
+                           (org-wild-notifier--get-tags (cl-first it))))])
+       (--filter (aref (cl-first it) 0))
+       (--map (aref (cl-first it) 1))))
 
 (defun org-wild-notifier--apply-whitelist (markers)
   "Apply whitelist to MARKERS."
@@ -260,33 +268,54 @@ Returns a list of notification messages"
         (package-initialize)
         (require 'org-wild-notifier)
 
-        (org-agenda-list 2
-                         (org-read-date nil nil "today"))
+;;        (org-agenda-list 2
+;;                         (org-read-date nil nil "today"))
 
-        (->> (org-split-string (buffer-string) "\n")
-             (--map (plist-get
-                     (org-fix-agenda-info (text-properties-at 0 it))
-                     'org-marker))
-             (-non-nil)
-             (org-wild-notifier--apply-whitelist)
-             (org-wild-notifier--apply-blacklist)
-             (-map 'org-wild-notifier--gather-info))))))
+        ;; (->> (org-split-string (buffer-string) "\n")
+;; 	     (--map (org-fix-agenda-info (text-properties-at 0 it)))
+;;              (--map `(,(plist-get it 'org-maker)
+;; 		      ,(plist-get it 'date)
+;; 		      ,(plist-get it 'time)))
+;; ;;              (--filter (cl-first it))
+;; ;; ;;             (org-wild-notifier--apply-whitelist)
+;; ;; ;;             (org-wild-notifier--apply-blacklist)
+;; 	     ;;              (-map 'org-wild-notifier--gather-info)
+;; 	     )
+	))))
 
 (defun org-wild-notifier--notify (event-msg)
   "Notify about an event using `alert' library.
 EVENT-MSG is a string representation of the event."
-  (alert event-msg :title org-wild-notifier-notification-title :severity org-wild-notifier--alert-severity))
+  (alert event-msg
+	 :icon org-wild-notifier-notification-icon
+	 :title org-wild-notifier-notification-title
+	 :severity org-wild-notifier--alert-severity))
 
-(defun org-wild-notifier--extract-time (marker)
+;; (defun psh/parse-strange-date (datestr timestr)
+;;   (let* ((date-elts (mapcar 'string-to-number (split-string datestr "-")))
+;; 	 (start-time (mapcar 'string-to-number
+;; 			     (split-string (cl-first (split-string timestr "-")) ":")))
+;; 	 (year (cl-first date-elts))
+;; 	 (month (cl-second date-elts))
+;; 	 (day (cl-third date-elts))
+;; 	 (hour (cl-first start-time))
+;; 	 (minute (cl-second start-time)))
+;;     (list 0 minute hour day month year nil nil nil))
+;;   )
+
+(defun org-wild-notifier--extract-time (entity-data)
   "Extract timestamps from MARKER.
 Timestamps are extracted as cons cells.  car holds org-formatted
 string, cdr holds time in list-of-integer format."
   (-non-nil
    (--map
-    (let ((org-timestamp (org-entry-get marker it)))
+    (let ((org-timestamp (org-entry-get (cl-first entity-data) it)))
       (and org-timestamp
            (cons org-timestamp
-                 (apply 'encode-time (org-parse-time-string org-timestamp)))))
+;;		 (psh/parse-strange-date (cl-second entity-data) (cl-third entity-data))
+                 (apply 'encode-time (org-parse-time-string org-timestamp))
+
+		 )))
     '("DEADLINE" "SCHEDULED" "TIMESTAMP"))))
 
 (defun org-wild-notifier--extract-title (marker)
@@ -307,12 +336,12 @@ standard notification interval (`org-wild-notifier-alert-time')."
             marker
             org-wild-notifier-alert-times-property))))
 
-(defun org-wild-notifier--gather-info (marker)
+(defun org-wild-notifier--gather-info (agenda-data)
   "Collect information about an event.
 MARKER acts like event's identifier."
-  `((times . (,(org-wild-notifier--extract-time marker)))
-    (title . ,(org-wild-notifier--extract-title marker))
-    (intervals . ,(org-wild-notifier--extract-notication-intervals marker))))
+  `((times . (,(org-wild-notifier--extract-time agenda-data)))
+    (title . ,(org-wild-notifier--extract-title (cl-first agenda-data)))
+    (intervals . ,(org-wild-notifier--extract-notication-intervals (cl-first agenda-data)))))
 
 (defun org-wild-notifier--stop ()
   "Stops the notification timer."
@@ -336,9 +365,12 @@ smoother experience this function also runs a check without timer."
   "Parse agenda view and notify about upcomming events."
   (interactive)
 
+  (message "before async")
   (async-start
    (org-wild-notifier--retrieve-events)
    (lambda (events)
+     (message "after async")
+     (message "%s" events)
      (-each
          (->> events
               (-map 'org-wild-notifier--check-event)
